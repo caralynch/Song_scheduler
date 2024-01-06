@@ -295,6 +295,17 @@ for lead in rehearsals:
     full_song_lists[lead] = to_concat
 
 index_lookup = df.song_name
+
+def map_set_to_song_names(pair_set):
+    song_names = ''
+    for i in pair_set:
+        song_names += f"{index_lookup[i]}, "
+    song_names = song_names.strip(', ')
+    return song_names
+
+for lead in full_song_lists:
+    full_song_lists[lead]['songs'] = full_song_lists[lead].pair_indices.apply(map_set_to_song_names)
+
 with pd.ExcelWriter(outfile) as excel_writer:
     index_lookup.to_excel(excel_writer, sheet_name='Song_lookup')
     for lead in full_song_lists:
