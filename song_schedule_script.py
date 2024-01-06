@@ -292,7 +292,7 @@ for lead in rehearsals:
             to_concat = rehearsals[lead][key]
         else:
             to_concat = pd.concat((to_concat, rehearsals[lead][key]), join='inner')
-    full_song_lists[lead] = to_concat
+    full_song_lists[lead] = to_concat.reset_index(drop=True)
 
 index_lookup = df.song_name
 
@@ -306,7 +306,24 @@ def map_set_to_song_names(pair_set):
 for lead in full_song_lists:
     full_song_lists[lead]['songs'] = full_song_lists[lead].pair_indices.apply(map_set_to_song_names)
 
+simultaneous_options = full_song_lists.copy()
+
+
+for lead in simultaneous_options:
+    new_cols = {}
+    for lead2 in [x for x in simultaneous_options if x!=lead]:
+        new_cols[lead2] = []
+    for i in simultaneous_options[lead].index:
+        for lead2 in [x for x in simultaneous_options if x!=lead]:
+            possible_pairs = []
+            for j in simultaneous_options[lead2].index:
+                if len(simultaneous_options[lead].loc[i, 'cast'] & simultaneous_options[lead2].loc[j,'cast']) == 0:
+                    possible_pairs.append(simultaneous_options[lead2].loc[j, 'pair_indices'])
+            new_cols[lead2].append(possible_pairs)
+    for lead2 in new_cols:
+        simultaneous_options[lead][f"{lead2}_possible_pairs"] = new_cols[lead2]
+
 with pd.ExcelWriter(outfile) as excel_writer:
-    index_lookup.to_excel(excel_writer, sheet_name='Song_lookup')
-    for lead in full_song_lists:
-        full_song_lists[lead].to_excel(excel_writer, sheet_name=lead, index=False)
+    df.to_excel(excel_writer, sheet_name='Song_lookup')
+    for lead in simultaneous_options:
+        simultaneous_options[lead].to_excel(excel_writer, sheet_name=lead, index=False)
