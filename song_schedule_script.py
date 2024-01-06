@@ -2,6 +2,8 @@ import numpy as np
 import math
 import pandas as pd 
 import sys
+import warnings
+warnings.simplefilter('ignore')
 
 # Read in input matrix
 if len(sys.argv) > 1:
