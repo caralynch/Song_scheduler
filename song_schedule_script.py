@@ -2,19 +2,35 @@ import numpy as np
 import math
 import pandas as pd 
 import sys
+import pickle
 import warnings
 warnings.simplefilter('ignore')
+
+# rehearsal duration slot size
+reh_length = 2.5
 
 # Read in input matrix
 if len(sys.argv) > 1:
     infile = sys.argv[1]
 else:
-    infile = 'matrix3.csv'
+    infile = 'master_timings_list.csv'
 
 if len(sys.argv) > 2:
     outfile = sys.argv[2]
 else:
-    outfile = 'successive_pairs.xlsx'
+    outfile = 'successive_pairs'
+
+# prioritise timings in ascending (True) or descending (False)
+if len(sys.argv) > 3:
+    timing_priority_ascending = sys.argv[3] == 'a'
+else:
+    timing_priority_ascending = False
+
+# prioritise cast in ascending (True) or descending (False)
+if len(sys.argv) > 4:
+    cast_priority_ascending = sys.argv[4] == 'a'
+else:
+    cast_priority_ascending = False
 
 df = pd.read_csv(infile)
 
@@ -56,8 +72,8 @@ def get_full_and_partial_slots(df, rehearsal_lead):
     """
     to_rehearse = df[df.lead == rehearsal_lead]
     separated_slots = {
-        'full_slots': to_rehearse[to_rehearse.slot_size % 1 == 0],
-        'partial_slots': to_rehearse[to_rehearse.slot_size % 1 != 0]
+        'full_slots': to_rehearse[to_rehearse.slot_size % reh_length == 0],
+        'partial_slots': to_rehearse[to_rehearse.slot_size % reh_length != 0]
     }
     return separated_slots
 
@@ -100,7 +116,7 @@ def calculate_overlap_array(partial_slots, dimensions):
 
 def find_complementary_durations(song_slot_size, song_name, remaining_slots):
     complementary_durations = [
-        x for x in remaining_slots.slot_size.unique() if (x + song_slot_size) % 1 == 0
+        x for x in remaining_slots.slot_size.unique() if (x + song_slot_size) % reh_length == 0
         ]
     # if can't find pair, tries trios
     if not complementary_durations:
@@ -109,7 +125,7 @@ def find_complementary_durations(song_slot_size, song_name, remaining_slots):
             
             for j in remaining_slots.slot_size.unique():
                 
-                if (i + j + song_slot_size) % 1 == 0:
+                if (i + j + song_slot_size) % reh_length == 0:
                     if ((i,j) not in complementary_durations) and ((j,i) not in complementary_durations):
                         complementary_durations.append((i,j))
         if not complementary_durations:
@@ -120,7 +136,7 @@ def find_complementary_durations(song_slot_size, song_name, remaining_slots):
 
                         for k in remaining_slots.slot_size.unique():
 
-                            if (i + j + k + song_slot_size) % 1 == 0:
+                            if (i + j + k + song_slot_size) % reh_length == 0:
                                 if (((i,j,k) not in complementary_durations) and ((i,k,j) not in complementary_durations) and
                                     ((j,k,i) not in complementary_durations) and ((j,i,k) not in complementary_durations) and
                                     ((k,i,j) not in complementary_durations) and ((k,j,i) not in complementary_durations)):
@@ -194,7 +210,7 @@ def find_partial_slot_pairings(partial_slots):
 
     # order songs by cast size (so large numbers are addressed first)
     partial_slots['cast_size'] = partial_slots.cast.apply(len)
-    partial_slots = partial_slots.sort_values(by='cast_size', ascending=False).reset_index().rename(columns={'index': 'original_index'})
+    partial_slots = partial_slots.sort_values(by='cast_size', ascending=cast_priority_ascending).reset_index().rename(columns={'index': 'original_index'})
 
     # get pair overlap arrays - start with only 2d and make 3 and 4d only if required
     overlap_array = pd.DataFrame(calculate_overlap_array(partial_slots, 2))
@@ -214,7 +230,7 @@ def find_partial_slot_pairings(partial_slots):
     }
 
     # Create a remain_to_pair list so that only unpaired songs are considered when pairing
-    remain_to_pair = list(partial_slots.sort_values(by="slot_size", ascending=False).index)
+    remain_to_pair = list(partial_slots.sort_values(by="slot_size", ascending=timing_priority_ascending).index)
 
     # Iterate through songs to pair
     while len(remain_to_pair) > 1:
@@ -303,8 +319,56 @@ def map_set_to_song_names(pair_set):
     song_names = song_names.strip(', ')
     return song_names
 
+def map_set_to_song_durations(pair_set):
+    song_durations = []
+    for i in pair_set:
+        song_durations.append(df.loc[i, 'slot_size'])
+    return song_durations
+
+def set_to_string(cast_set):
+    cast_string = ''
+    for i in cast_set:
+        cast_string += f'{i}, '
+    cast_string = cast_string.strip(', ')
+    return cast_string
+
+def map_set_to_cast_lists(pair_set):
+    cast_list = []
+    for i in pair_set:
+        cast_list.append(set_to_string(df.loc[i, 'cast']))
+    return cast_list
+
+def map_set_to_cast_sizes(pair_set):
+    cast_sizes = []
+    for i in pair_set:
+        cast_sizes.append(len(df.loc[i, 'cast']))
+    return cast_sizes
+
+def map_set_to_cast_overlap(pair_set):
+    i = 0
+    for n in pair_set:
+        if i == 0:
+            cast_intersect = df.loc[n, 'cast']
+        else:
+            cast_intersect = cast_intersect & df.loc[n, 'cast']
+        i += 1
+    return len(cast_intersect)
+
+additional_info = {
+    'songs': map_set_to_song_names,
+    'casts': map_set_to_cast_lists,
+    'slots': map_set_to_song_durations,
+    'cast_sizes': map_set_to_cast_sizes,
+    'cast_overlap': map_set_to_cast_overlap
+}
+
 for lead in full_song_lists:
-    full_song_lists[lead]['songs'] = full_song_lists[lead].pair_indices.apply(map_set_to_song_names)
+    #print(lead)
+    for col in additional_info:
+        #print(col)
+        full_song_lists[lead][col] = full_song_lists[lead].pair_indices.apply(additional_info[col])
+
+
 
 simultaneous_options = full_song_lists.copy()
 
@@ -323,7 +387,11 @@ for lead in simultaneous_options:
     for lead2 in new_cols:
         simultaneous_options[lead][f"{lead2}_possible_pairs"] = new_cols[lead2]
 
-with pd.ExcelWriter(outfile) as excel_writer:
+with pd.ExcelWriter(f"{outfile}.xlsx") as excel_writer:
     df.to_excel(excel_writer, sheet_name='Song_lookup')
     for lead in simultaneous_options:
         simultaneous_options[lead].to_excel(excel_writer, sheet_name=lead, index=False)
+
+
+
+pickle.dump(simultaneous_options, open(f"{outfile}.p", 'wb'))
